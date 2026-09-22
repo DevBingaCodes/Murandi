@@ -1,3 +1,7 @@
 node_modules/
 .env
 /generated/prisma
+.README1.md
+local_backup.sql
+murandi_apartments_20260922_164845.sql
+murandi_apartments_20260922_173331.neon.sql

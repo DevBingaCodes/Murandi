@@ -22,44 +22,44 @@ jobs:
           cache: 'npm'
 
       - name: Install backend dependencies
-        run: npm install --legacy-peer-deps
+        run: npm ci --legacy-peer-deps
 
       - name: Run unit tests
-        run: npm test
+        run: npm test -- --ci
 
-      - name: Setup SSH
-        uses: webfactory/ssh-agent@v0.9.0
-        with:
-          ssh-private-key: ${{ secrets.SSH_KEY }}
+      # - name: Setup SSH
+      #   uses: webfactory/ssh-agent@v0.9.0
+      #   with:
+      #     ssh-private-key: ${{ secrets.SSH_KEY }}
 
-      - name: Deploy to VPS
-        run: |
-          ssh -o StrictHostKeyChecking=no ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} << 'EOF'
-            # Load NVM and use Node 24
-            export NVM_DIR="$HOME/.nvm"
-            [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
-            nvm use 24
+      # - name: Deploy to VPS
+      #   run: |
+      #     ssh -o StrictHostKeyChecking=no ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} << 'EOF'
+      #       # Load NVM and use Node 24
+      #       export NVM_DIR="$HOME/.nvm"
+      #       [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
+      #       nvm use 24
 
-            echo "Using Node version: $(node -v)"
-            echo "Using NPM version: $(npm -v)"
+      #       echo "Using Node version: $(node -v)"
+      #       echo "Using NPM version: $(npm -v)"
 
-            cd ${{ secrets.PROJECT_PATH }}
+      #       cd ${{ secrets.PROJECT_PATH }}
 
-            echo "Pulling latest code..."
-            git pull origin master
+      #       echo "Pulling latest code..."
+      #       git pull origin master
 
-            echo "Installing backend dependencies..."
-            npm install --legacy-peer-deps
+      #       echo "Installing backend dependencies..."
+      #       npm install --legacy-peer-deps
 
-            echo "Building client..."
-            cd client
-            npm install --legacy-peer-deps
-            npm run build
-            cd ..
+      #       echo "Building client..."
+      #       cd client
+      #       npm install --legacy-peer-deps
+      #       npm run build
+      #       cd ..
 
 
-            echo "Restarting PM2..."
-            pm2 reload murandi || pm2 start index.js --name Murandi
+      #       echo "Restarting PM2..."
+      #       pm2 reload murandi || pm2 start index.js --name Murandi
 
-            echo "Deployment complete!"
-          EOF
+      #       echo "Deployment complete!"
+      #     EOF

@@ -235,7 +235,10 @@ const loginTenant = async (req, res) => {
     // Set JWT token in the cookie
     res.cookie("tenantSession", tenantToken, {
       httpOnly: true,
-      maxAge: 24 * 60 * 60 * 1000, // 1 day in milliseconds
+      secure: true,
+      sameSite: "none",
+      maxAge: 24 * 60 * 60 * 1000,
+      path: "/",
     });
 
     // Return success message

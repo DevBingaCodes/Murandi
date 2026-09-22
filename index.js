@@ -47,6 +47,7 @@ app.use("/murandi/v1/reports", require("./routes/reports"));
 app.use("/murandi/v1/receipts", require("./routes/receipts"));
 app.use("/murandi/v1/notifications", require("./routes/notifications"));
 app.use("/murandi/v1/password", require("./routes/password"));
+app.use("/murandi/v1/metrics", require("./routes/metrics"))
 
 // Start the server only if not in test environment
 if (process.env.NODE_ENV !== "test") {
