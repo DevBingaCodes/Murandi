@@ -1,4 +1,5 @@
-name: Deploy Publication Site
+
+name: Deploy Murandi API
 
 on:
   push:
@@ -9,57 +10,178 @@ jobs:
   deploy:
     name: Deployment Pipeline
     runs-on: ubuntu-latest
-    
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Setup NodeJS
-        uses: actions/setup-node@v4
+      # 1. Setup SSH authentication
+      - name: Setup SSH
+        uses: webfactory/ssh-agent@v0.9.0
         with:
-          node-version: '24'
-          cache: 'npm'
+          ssh-private-key: ${{ secrets.SSH_KEY }}
 
-      - name: Install backend dependencies
-        run: npm ci --legacy-peer-deps
+      # 2. Transfer production secrets to the VPS
+      - name: Configure production environment
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          JWT_SECRET: ${{ secrets.JWT_SECRET }}
+          STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
+          STRIPE_WEBHOOK: ${{ secrets.STRIPE_WEBHOOK }}
 
-      - name: Run unit tests
-        run: npm test -- --ci
+        run: |
+          set -euo pipefail
 
-      # - name: Setup SSH
-      #   uses: webfactory/ssh-agent@v0.9.0
-      #   with:
-      #     ssh-private-key: ${{ secrets.SSH_KEY }}
+          ENV_B64="$(node -e '
+            const keys = [
+              "DATABASE_URL",
+              "JWT_SECRET",
+              "STRIPE_SECRET_KEY",
+              "STRIPE_WEBHOOK"
+            ];
 
-      # - name: Deploy to VPS
-      #   run: |
-      #     ssh -o StrictHostKeyChecking=no ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} << 'EOF'
-      #       # Load NVM and use Node 24
-      #       export NVM_DIR="$HOME/.nvm"
-      #       [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
-      #       nvm use 24
+            for (const key of keys) {
+              if (!process.env[key]) {
+                console.error(`Missing GitHub secret: ${key}`);
+                process.exit(1);
+              }
+            }
 
-      #       echo "Using Node version: $(node -v)"
-      #       echo "Using NPM version: $(npm -v)"
+            const contents = keys
+              .map(key => `${key}=${JSON.stringify(process.env[key])}`)
+              .join("\n") + "\n";
 
-      #       cd ${{ secrets.PROJECT_PATH }}
+            process.stdout.write(
+              Buffer.from(contents).toString("base64")
+            );
+          ')"
 
-      #       echo "Pulling latest code..."
-      #       git pull origin master
+          printf '%s' "$ENV_B64" | ssh \
+            -o StrictHostKeyChecking=no \
+            ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} \
+            'umask 077; mkdir -p /home/binga/app-configs && base64 --decode > /home/binga/app-configs/Murandi.env.tmp && mv /home/binga/app-configs/Murandi.env.tmp /home/binga/app-configs/Murandi.env && chmod 600 /home/binga/app-configs/Murandi.env'
 
-      #       echo "Installing backend dependencies..."
-      #       npm install --legacy-peer-deps
+      # 3. Deploy and provision VPS
+      - name: Deploy and Provision VPS
+        run: |
+          ssh -o StrictHostKeyChecking=no ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} << 'EOF'
+            set -e
 
-      #       echo "Building client..."
-      #       cd client
-      #       npm install --legacy-peer-deps
-      #       npm run build
-      #       cd ..
+            APP_DIR="/home/binga/apps/Murandi"
+            APP_NAME="Murandi API"
+            DOMAIN="api.murandi.skirill.org"
+            PORT="5700"
+            REPO="git@github.com:DevBingaCodes/Murandi.git"
+            ENV_FILE="/home/binga/app-configs/Murandi.env"
 
+            # Load Node.js through NVM
+            export NVM_DIR="$HOME/.nvm"
+            [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
+            nvm use 26.13.0
 
-      #       echo "Restarting PM2..."
-      #       pm2 reload murandi || pm2 start index.js --name Murandi
+            echo "Node: $(node -v)"
+            echo "NPM: $(npm -v)"
 
-      #       echo "Deployment complete!"
-      #     EOF
+            # Verify non-interactive sudo access
+            sudo -n /usr/bin/apt-get --version > /dev/null
+
+            # Install Nginx and Certbot if necessary
+            if ! command -v nginx >/dev/null 2>&1 || \
+               ! command -v certbot >/dev/null 2>&1 || \
+               ! dpkg -s python3-certbot-nginx >/dev/null 2>&1; then
+
+              echo "Installing Nginx and Certbot..."
+              sudo apt-get update
+              sudo apt-get install -y nginx certbot python3-certbot-nginx
+            fi
+
+            # Create application directory
+            mkdir -p /home/binga/apps
+
+            # Clone repository on first deployment
+            if [ ! -d "$APP_DIR/.git" ]; then
+              if [ -e "$APP_DIR" ]; then
+                echo "Application directory exists but is not a Git repository."
+                exit 1
+              fi
+
+              echo "Cloning repository..."
+              git clone "$REPO" "$APP_DIR"
+            fi
+
+            cd "$APP_DIR"
+
+            # Ensure SSH-based GitHub authentication
+            git remote set-url origin "$REPO"
+
+            echo "Pulling latest code..."
+            git pull --ff-only origin master
+
+            # Connect protected environment file
+            if [ ! -f "$ENV_FILE" ]; then
+              echo "Production environment file is missing."
+              exit 1
+            fi
+
+            ln -sfn "$ENV_FILE" "$APP_DIR/.env"
+
+            # Install production dependencies
+            echo "Installing production dependencies..."
+            npm ci --omit=dev
+
+            # Configure Nginx on first deployment
+            NGINX_CONFIG="/etc/nginx/sites-available/$DOMAIN"
+
+            if [ ! -f "$NGINX_CONFIG" ]; then
+              echo "Creating Nginx configuration..."
+
+              printf '%s\n' \
+                'server {' \
+                '    listen 80;' \
+                '    listen [::]:80;' \
+                '' \
+                "    server_name $DOMAIN;" \
+                '' \
+                '    location / {' \
+                "        proxy_pass http://127.0.0.1:$PORT;" \
+                '        proxy_http_version 1.1;' \
+                '' \
+                '        proxy_set_header Host $host;' \
+                '        proxy_set_header X-Real-IP $remote_addr;' \
+                '        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;' \
+                '        proxy_set_header X-Forwarded-Proto $scheme;' \
+                '    }' \
+                '}' | sudo tee "$NGINX_CONFIG" > /dev/null
+            fi
+
+            # Enable Nginx site
+            sudo ln -sfn "$NGINX_CONFIG" "/etc/nginx/sites-enabled/$DOMAIN"
+
+            sudo nginx -t
+            sudo systemctl enable --now nginx
+            sudo systemctl reload nginx
+
+            # Start or restart application using PM2
+            echo "Starting application..."
+
+            if pm2 describe "$APP_NAME" >/dev/null 2>&1; then
+              pm2 restart "$APP_NAME" --update-env
+            else
+              pm2 start npm --name "$APP_NAME" -- start
+            fi
+
+            pm2 save
+
+            # Configure HTTPS
+            echo "Configuring HTTPS..."
+
+            sudo certbot --nginx \
+              -d "$DOMAIN" \
+              --non-interactive \
+              --agree-tos \
+              --register-unsafely-without-email \
+              --redirect
+
+            # Enable automatic certificate renewal
+            sudo systemctl enable --now certbot.timer
+
+            echo "Murandi deployment completed successfully!"
+            pm2 status
+          EOF

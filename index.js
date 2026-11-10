@@ -1,8 +1,10 @@
-// server.js
+// index.js
 const express = require("express");
-const dotenv = require("dotenv");
 const cookieParser = require("cookie-parser");
 const cors = require("cors");
+
+//Apply secrets/variables
+require("dotenv").config();
 
 // Declare App
 const app = express();
@@ -52,7 +54,8 @@ app.use("/murandi/v1/metrics", require("./routes/metrics"))
 // Start the server only if not in test environment
 if (process.env.NODE_ENV !== "test") {
   const PORT = process.env.PORT || 5700;
-  app.listen(PORT, () => {
+
+  app.listen(PORT, "127.0.0.1", () => {
     console.log(`Server started on port ${PORT}`);
   });
 }
