@@ -55,7 +55,7 @@ app.use("/murandi/v1/metrics", require("./routes/metrics"))
 if (process.env.NODE_ENV !== "test") {
   const PORT = process.env.PORT || 5700;
 
-  app.listen(PORT, "127.0.0.1", () => {
+  app.listen(PORT, "0.0.0.0", () => {
     console.log(`Server started on port ${PORT}`);
   });
 }
